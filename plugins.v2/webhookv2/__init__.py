@@ -9,26 +9,28 @@ from app.utils.http import RequestUtils
 
 
 class WebHookv2(_PluginBase):
-    # 插件基本信息
+    # 插件基本信息【按要求固定】
     plugin_name = "WebHookv2"
-    plugin_desc = "将MoviePilot消息推送到自定义推送接口（支持Bearer/Path Token，GET/POST）"
+    plugin_desc = "MoviePilot V2 系统通知推送至自定义接口，支持Bearer/PathToken，POST/GET"
     plugin_icon = "webhook.png"
     plugin_version = "2.0"
     plugin_author = "WINGS"
-    author_url = "https://github.com/jxxghp"
-    plugin_config_prefix = "webhookV2"
+    author_url = ""
+    plugin_config_prefix = "webhookv2"
     plugin_order = 14
     auth_level = 1
 
-    # 配置
+    # 配置项
     _enabled: bool = False
     _api_base: str = ""
     _token: str = ""
-    _auth_mode: str = "bearer"  # bearer / path
-    _send_mode: str = "post"    # post / get
+    _auth_mode: str = "bearer"
+    _send_mode: str = "post"
     _msg_type: str = "text"
 
     def init_plugin(self, config: dict = None):
+        # V2 版本判断
+        self.version = settings.VERSION_FLAG if hasattr(settings, "VERSION_FLAG") else "v1"
         if config:
             self._enabled = config.get("enabled", False)
             self._api_base = config.get("api_base", "").strip()
@@ -52,7 +54,6 @@ class WebHookv2(_PluginBase):
             {
                 "component": "VForm",
                 "content": [
-                    # 启用开关
                     {
                         "component": "VRow",
                         "content": [
@@ -71,7 +72,6 @@ class WebHookv2(_PluginBase):
                             }
                         ]
                     },
-                    # API地址 + Token
                     {
                         "component": "VRow",
                         "content": [
@@ -84,7 +84,7 @@ class WebHookv2(_PluginBase):
                                         "props": {
                                             "model": "api_base",
                                             "label": "接口基础地址",
-                                            "placeholder": "例如：http://192.168.1.2:818"
+                                            "placeholder": "http://192.168.1.2:818"
                                         }
                                     }
                                 ]
@@ -98,14 +98,12 @@ class WebHookv2(_PluginBase):
                                         "props": {
                                             "model": "token",
                                             "label": "接口令牌 Token",
-                                            "placeholder": "你的推送token"
                                         }
                                     }
                                 ]
                             }
                         ]
                     },
-                    # 认证方式 + 发送方式
                     {
                         "component": "VRow",
                         "content": [
@@ -119,9 +117,9 @@ class WebHookv2(_PluginBase):
                                             "model": "auth_mode",
                                             "label": "Token 位置",
                                             "items": [
-                                                                {"title": "Authorization Bearer", "value": "bearer"},
-                                                                {"title": "URL路径 /api/push/{token}", "value": "path"}
-                            ]
+                                                {"title": "Bearer Header", "value": "bearer"},
+                                                {"title": "URL Path", "value": "path"}
+                                            ]
                                         }
                                     }
                                 ]
@@ -136,9 +134,9 @@ class WebHookv2(_PluginBase):
                                             "model": "send_mode",
                                             "label": "请求方式",
                                             "items": [
-                                                                {"title": "POST JSON（推荐）", "value": "post"},
-                                                                {"title": "GET 参数", "value": "get"}
-                            ]
+                                                {"title": "POST JSON", "value": "post"},
+                                                {"title": "GET 参数", "value": "get"}
+                                            ]
                                         }
                                     }
                                 ]
@@ -153,10 +151,10 @@ class WebHookv2(_PluginBase):
                                             "model": "msg_type",
                                             "label": "消息类型",
                                             "items": [
-                                                                {"title": "text", "value": "text"},
-                                                                {"title": "markdown", "value": "markdown"},
-                                                                {"title": "html", "value": "html"}
-                            ]
+                                                {"title": "text", "value": "text"},
+                                                {"title": "markdown", "value": "markdown"},
+                                                {"title": "html", "value": "html"}
+                                            ]
                                         }
                                     }
                                 ]
@@ -179,9 +177,6 @@ class WebHookv2(_PluginBase):
 
     @eventmanager.register(EventType.NoticeMessage)
     def handle_notify(self, event: Event):
-        """
-        监听系统通知消息，推送到你的接口
-        """
         if not self._enabled or not self._api_base or not self._token:
             return
 
@@ -194,74 +189,56 @@ class WebHookv2(_PluginBase):
         self._push(title, content)
 
     def _push(self, title: str, content: str):
-        """
-        严格按照你提供的接口规范发送
-        """
         base = self._api_base.rstrip("/")
         token = self._token
-        msg_type = self._msg_type
-
-        headers = {}
         payload = {
             "title": title,
             "content": content,
-            "type": msg_type
+            "type": self._msg_type
         }
+        headers = {}
 
-        # ======================
-        # 1. Bearer Token + POST（官方推荐）
-        # ======================
-        if self._auth_mode == "bearer" and self._send_mode == "post":
-            url = f"{base}/api/push"
-            headers["Authorization"] = f"Bearer {token}"
-            headers["Content-Type"] = "application/json"
-            try:
+        try:
+            # 推荐方式：Bearer + POST
+            if self._auth_mode == "bearer" and self._send_mode == "post":
+                url = f"{base}/api/push"
+                headers["Authorization"] = f"Bearer {token}"
+                headers["Content-Type"] = "application/json"
                 ret = RequestUtils(headers=headers).post_res(url, json=payload)
-                self._parse_result(ret)
-            except Exception as e:
-                logger.error(f"推送异常: {e}")
 
-        # ======================
-        # 2. Path Token + POST
-        # ======================
-        elif self._auth_mode == "path" and self._send_mode == "post":
-            url = f"{base}/api/push/{token}"
-            headers["Content-Type"] = "application/json"
-            try:
+            # Path Token + POST
+            elif self._auth_mode == "path" and self._send_mode == "post":
+                url = f"{base}/api/push/{token}"
+                headers["Content-Type"] = "application/json"
                 ret = RequestUtils(headers=headers).post_res(url, json=payload)
-                self._parse_result(ret)
-            except Exception as e:
-                logger.error(f"推送异常: {e}")
 
-        # ======================
-        # 3. Path Token + GET（测试用）
-        # ======================
-        elif self._auth_mode == "path" and self._send_mode == "get":
-            url = f"{base}/api/push/{token}"
-            try:
+            # Path Token + GET
+            elif self._auth_mode == "path" and self._send_mode == "get":
+                url = f"{base}/api/push/{token}"
                 ret = RequestUtils().get_res(url, params=payload)
-                self._parse_result(ret)
-            except Exception as e:
-                logger.error(f"推送异常: {e}")
+
+            else:
+                logger.warning("不支持的推送模式组合")
+                return
+
+            self._parse_result(ret)
+
+        except Exception as e:
+            logger.error(f"推送异常: {str(e)}")
 
     def _parse_result(self, ret: Any):
-        """
-        解析你接口的返回格式（success/code/message）
-        """
         if not ret:
             logger.error("推送失败：接口无响应")
             return
-
         try:
             res = ret.json()
         except Exception:
-            logger.error(f"推送失败，返回非JSON：{ret.text[:200]}")
+            logger.error(f"返回非JSON: {ret.text[:200]}")
             return
 
         success = res.get("success", False)
         code = res.get("code")
         msg = res.get("message", "")
-
         if success:
             logger.info(f"推送成功 [{code}]: {msg}")
         else:

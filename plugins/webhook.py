@@ -427,4 +427,4 @@ class UnifiedPushNotifier(_PluginBase):
     def stop_service(self):
         """插件停止时清理资源"""
         self._enabled = False
-        logger.info("统一推送服务已停止")
+            logger.info("统一推送服务已停止")

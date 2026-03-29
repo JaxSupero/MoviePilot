@@ -1,9 +1,7 @@
-from typing import Any, List, Dict, Tuple, Optional
+from typing import Any, List, Dict, Tuple
 import re
 import threading
 import time
-import urllib.parse
-from datetime import datetime
 
 from app.core.config import settings
 from app.core.event import eventmanager
@@ -17,7 +15,7 @@ class UnifiedPushNotifier(_PluginBase):
     # 插件元数据
     plugin_name = "统一推送服务"
     plugin_desc = "将MoviePilot事件推送到自定义的统一推送服务（支持标题/内容模板、Token认证）"
-    plugin_icon = "webhook.png"
+    plugin_icon = "notification.png"
     plugin_version = "1.1"
     plugin_author = "User"
     author_url = "https://github.com/yourname"
@@ -27,20 +25,20 @@ class UnifiedPushNotifier(_PluginBase):
 
     # 私有配置
     _enabled = False
-    _base_url = ""                 # 服务基础地址，如 http://192.168.1.2:818
-    _token = ""                    # 接口令牌
-    _token_location = "path"       # path 或 header
-    _push_path = "/api/push"       # 推送路径，实际URL = base_url + push_path
-    _method = "POST"               # 固定POST，也可保留GET但文档推荐POST
-    _title_template = "{event_type}"   # 标题模板
-    _content_template = "{data}"       # 内容模板
-    _msg_type = "text"             # text, markdown, html
-    _event_filters = []            # 可选：只推送指定事件类型列表，空表示全部
-    _timeout = 10                  # 请求超时秒数
-    _retry_times = 2               # 重试次数
+    _base_url = ""
+    _token = ""
+    _token_location = "path"
+    _push_path = "/api/push"
+    _method = "POST"
+    _title_template = "{event_type}"
+    _content_template = "{data}"
+    _msg_type = "text"
+    _event_filters = []
+    _timeout = 10
+    _retry_times = 2
 
     def init_plugin(self, config: dict = None):
-        """初始化插件配置"""
+        super().init_plugin(config)  # 调用父类初始化
         if config:
             self._enabled = config.get("enabled", False)
             self._base_url = config.get("base_url", "").rstrip('/')
@@ -60,10 +58,10 @@ class UnifiedPushNotifier(_PluginBase):
 
     @staticmethod
     def get_command() -> List[Dict[str, Any]]:
-        pass
+        return []  # 无命令注册，返回空列表
 
     def get_api(self) -> List[Dict[str, Any]]:
-        pass
+        return []  # 无API接口，返回空列表
 
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """构建配置表单"""
@@ -293,7 +291,7 @@ class UnifiedPushNotifier(_PluginBase):
         }
 
     def get_page(self) -> List[dict]:
-        pass
+        return []  # 无额外页面
 
     def _safe_to_dict(self, obj: Any, _depth: int = 0) -> Any:
         """安全地将对象转换为字典/基本类型，避免循环引用和过深嵌套"""
@@ -321,7 +319,6 @@ class UnifiedPushNotifier(_PluginBase):
         if not template:
             return ""
         result = template.replace("{event_type}", event_type)
-        # 处理 {data.xxx} 格式
         pattern = r"{data\.([^}]+)}"
         for match in re.findall(pattern, result):
             keys = match.split('.')
@@ -336,7 +333,6 @@ class UnifiedPushNotifier(_PluginBase):
             except Exception:
                 value = ""
             result = result.replace(f"{{data.{match}}}", str(value))
-        # 支持 {data} 输出整个数据字典的字符串形式
         if "{data}" in result:
             result = result.replace("{data}", str(event_data))
         return result.strip()
@@ -365,7 +361,7 @@ class UnifiedPushNotifier(_PluginBase):
         except Exception as e:
             logger.error(f"推送请求异常: {e}")
             if retry < self._retry_times:
-                delay = 2 ** retry  # 指数退避：1s, 2s, 4s...
+                delay = 2 ** retry
                 logger.info(f"重试第 {retry+1} 次，等待 {delay} 秒...")
                 time.sleep(delay)
                 return self._send_push(url, headers, payload, retry+1)
@@ -384,14 +380,12 @@ class UnifiedPushNotifier(_PluginBase):
             logger.debug(f"跳过未过滤事件: {event_type}")
             return
 
-        # 转换事件数据
         try:
             event_data = self._safe_to_dict(event.event_data)
         except Exception as e:
             logger.error(f"事件数据转换失败: {e}")
             event_data = {}
 
-        # 渲染标题和内容
         title = self._render_template(self._title_template, event_type, event_data)
         content = self._render_template(self._content_template, event_type, event_data)
 
@@ -399,14 +393,13 @@ class UnifiedPushNotifier(_PluginBase):
             logger.warning("渲染后的内容为空，取消推送")
             return
 
-        # 构造请求体（符合目标接口文档限制）
         payload = {
             "title": title[:200] if title else "",
             "content": content[:5000],
             "type": self._msg_type
         }
 
-        # 安全拼接 URL：处理 base_url 和 push_path 的斜杠
+        # 安全拼接 URL
         base = self._base_url.rstrip('/')
         path = self._push_path.lstrip('/')
         if self._token_location == "path":
@@ -418,7 +411,6 @@ class UnifiedPushNotifier(_PluginBase):
         if self._token_location == "header":
             headers["Authorization"] = f"Bearer {self._token}"
 
-        # 异步发送（避免阻塞事件循环）
         def async_send():
             self._send_push(full_url, headers, payload)
 
@@ -427,4 +419,4 @@ class UnifiedPushNotifier(_PluginBase):
     def stop_service(self):
         """插件停止时清理资源"""
         self._enabled = False
-            logger.info("统一推送服务已停止")
+        logger.info("统一推送服务已停止")

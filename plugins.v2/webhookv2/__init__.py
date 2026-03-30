@@ -15,7 +15,7 @@ class WebHookv2(_PluginBase):
     plugin_icon = "webhook.png"
     plugin_version = "2.3"
     plugin_author = "WINGS"
-    author_url = ""
+    author_url = "https://github.com/JaxSupero/MoviePilot-Plugin"
     plugin_config_prefix = "webhookv2"
     plugin_order = 14
     auth_level = 1

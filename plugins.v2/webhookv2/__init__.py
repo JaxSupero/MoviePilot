@@ -9,16 +9,18 @@ from app.utils.http import RequestUtils
 
 
 class WebHookv2(_PluginBase):
+    # 插件基本信息【按要求固定】
     plugin_name = "WebHookv2"
     plugin_desc = "MoviePilot V2 系统通知推送至自定义接口，支持Bearer/PathToken，POST/GET"
     plugin_icon = "webhook.png"
-    plugin_version = "2.5"
+    plugin_version = "2.1"
     plugin_author = "WINGS"
-    author_url = "https://github.com/JaxSupero/MoviePilot-Plugin"
+    author_url = ""
     plugin_config_prefix = "webhookv2"
     plugin_order = 14
     auth_level = 1
 
+    # 配置项
     _enabled: bool = False
     _api_base: str = ""
     _token: str = ""
@@ -27,6 +29,7 @@ class WebHookv2(_PluginBase):
     _msg_type: str = "text"
 
     def init_plugin(self, config: dict = None):
+        # V2 版本判断
         self.version = settings.VERSION_FLAG if hasattr(settings, "VERSION_FLAG") else "v1"
         if config:
             self._enabled = config.get("enabled", False)
@@ -131,8 +134,8 @@ class WebHookv2(_PluginBase):
                                             "model": "send_mode",
                                             "label": "请求方式",
                                             "items": [
-                                                {"title": "POST", "value": "post"},
-                                                {"title": "GET", "value": "get"}
+                                                {"title": "POST JSON", "value": "post"},
+                                                {"title": "GET 参数", "value": "get"}
                                             ]
                                         }
                                     }
@@ -146,10 +149,11 @@ class WebHookv2(_PluginBase):
                                         "component": "VSelect",
                                         "props": {
                                             "model": "msg_type",
-                                            "label": "消息格式",
+                                            "label": "消息类型",
                                             "items": [
-                                                {"title": "Text", "value": "text"},
-                                                {"title": "Json", "value": "json"}
+                                                {"title": "text", "value": "text"},
+                                                {"title": "markdown", "value": "markdown"},
+                                                {"title": "html", "value": "html"}
                                             ]
                                         }
                                     }
@@ -161,7 +165,7 @@ class WebHookv2(_PluginBase):
             }
         ], {
             "enabled": False,
-            "api_base": "",
+            "api_base": "http://192.168.1.2:818",
             "token": "",
             "auth_mode": "bearer",
             "send_mode": "post",
@@ -169,55 +173,91 @@ class WebHookv2(_PluginBase):
         }
 
     def get_page(self) -> List[dict]:
-        pass
+        return []
 
-    @eventmanager.register(EventType)
-    def send(self, event: Event):
-        if not self._enabled or not self._api_base:
+    @eventmanager.register(EventType.NoticeMessage)
+    def handle_notify(self, event: Event):
+        if not self._enabled or not self._api_base or not self._token:
             return
 
-        event_data = event.event_data
-        event_type = event.event_type.value if hasattr(event.event_type, "value") else event.event_type
+        data = event.event_data or {}
+        logger.info(f"通知事件数据：{data}")
 
-        def to_dict(obj):
-            if isinstance(obj, dict):
-                return {k: to_dict(v) for k, v in obj.items()}
-            elif isinstance(obj, list):
-                return [to_dict(i) for i in obj]
-            elif hasattr(obj, "to_dict"):
-                return to_dict(obj.to_dict())
-            elif hasattr(obj, "__dict__"):
-                return to_dict(obj.__dict__)
-            else:
-                return obj
+        # ========================
+        # 【V2 修复】正确获取标题和内容
+        # ========================
+        title = data.get("title") or data.get("message_title") or "MoviePilot 通知"
+        text = data.get("text") or data.get("message_content") or ""
+        msg_type = data.get("type")
 
-        data = {
-            "event": event_type,
-            "data": to_dict(event_data)
+        # 空内容直接跳过
+        if not text:
+            logger.info("跳过空消息通知")
+            return
+
+        # 强制使用合法的消息类型（解决类型错误）
+        if msg_type not in ["text", "markdown", "html"]:
+            msg_type = self._msg_type
+
+        self._push(title, text, msg_type)
+
+    def _push(self, title: str, content: str, msg_type: str):
+        base = self._api_base.rstrip("/")
+        token = self._token
+
+        # 严格按照接口要求组装JSON
+        payload = {
+            "title": title,
+            "content": content,
+            "type": msg_type
         }
-
-        url = self._api_base
         headers = {}
-        if self._auth_mode == "bearer" and self._token:
-            headers["Authorization"] = f"Bearer {self._token}"
-        if self._auth_mode == "path" and self._token:
-            if "?" in url:
-                url += f"&token={self._token}"
-            else:
-                url += f"?token={self._token}"
 
         try:
-            if self._send_mode == "post":
-                res = RequestUtils(headers=headers, timeout=10).post_res(url, json=data)
-            else:
-                res = RequestUtils(headers=headers, timeout=10).get_res(url, params=data)
+            # 推荐方式：Bearer + POST
+            if self._auth_mode == "bearer" and self._send_mode == "post":
+                url = f"{base}/api/push"
+                headers["Authorization"] = f"Bearer {token}"
+                headers["Content-Type"] = "application/json"
+                ret = RequestUtils(headers=headers).post_res(url, json=payload)
 
-            if res and res.ok:
-                logger.info(f"WebHookv2 发送成功 | {url}")
+            # Path Token + POST
+            elif self._auth_mode == "path" and self._send_mode == "post":
+                url = f"{base}/api/push/{token}"
+                headers["Content-Type"] = "application/json"
+                ret = RequestUtils(headers=headers).post_res(url, json=payload)
+
+            # Path Token + GET
+            elif self._auth_mode == "path" and self._send_mode == "get":
+                url = f"{base}/api/push/{token}"
+                ret = RequestUtils().get_res(url, params=payload)
+
             else:
-                logger.error(f"WebHookv2 发送失败 | {url}")
+                logger.warning("不支持的推送模式组合")
+                return
+
+            self._parse_result(ret)
+
         except Exception as e:
-            logger.error(f"WebHookv2 发送异常：{str(e)}")
+            logger.error(f"推送异常: {str(e)}")
+
+    def _parse_result(self, ret: Any):
+        if not ret:
+            logger.error("推送失败：接口无响应")
+            return
+        try:
+            res = ret.json()
+        except Exception:
+            logger.error(f"返回非JSON: {ret.text[:200]}")
+            return
+
+        success = res.get("success", False)
+        code = res.get("code")
+        msg = res.get("message", "")
+        if success:
+            logger.info(f"推送成功 [{code}]: {msg}")
+        else:
+            logger.error(f"推送失败 [{code}]: {msg}")
 
     def stop_service(self):
         pass

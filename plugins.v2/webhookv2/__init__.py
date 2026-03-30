@@ -13,7 +13,7 @@ class WebHookv2(_PluginBase):
     plugin_name = "WebHookv2"
     plugin_desc = "MoviePilot V2 系统通知推送至自定义接口，支持Bearer/PathToken，POST/GET"
     plugin_icon = "webhook.png"
-    plugin_version = "2.1"
+    plugin_version = "2.5"
     plugin_author = "WINGS"
     author_url = ""
     plugin_config_prefix = "webhookv2"
@@ -173,7 +173,7 @@ class WebHookv2(_PluginBase):
         }
 
     def get_page(self) -> List[dict]:
-        return []
+        pass
 
     @eventmanager.register(EventType.NoticeMessage)
     def handle_notify(self, event: Event):
